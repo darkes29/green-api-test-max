@@ -1,36 +1,125 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# green-api-testing
 
-## Getting Started
+Веб-клиент для инстанса [GREEN-API](https://green-api.com/v3/docs/) мессенджера MAX. После входа можно проверить номер, открыть чат, отправить текст и получить входящие сообщения. `idInstance` и `apiTokenInstance` в браузер не попадают: сервер хранит их в httpOnly-cookie.
 
-First, run the development server:
+Хост API берётся из `GREEN_API_URL`. Если переменная не задана, используется `https://3100.api.green-api.com`.
+
+## Возможности
+
+- Вход по `idInstance` и `apiTokenInstance`. Сессия создаётся только если `getStateInstance` вернул `authorized`.
+- Выход с очисткой cookie.
+- Новый чат по номеру: Россия `+7` (10 цифр без кода) или Беларусь `+375` (9 цифр без кода).
+- Список чатов и переписка. В шапке и в списке показываются имя и телефон контакта, а не идентификатор чата.
+- Отправка текста до 4000 символов.
+- Приём входящих текстовых сообщений через очередь уведомлений.
+- Понятная ошибка, если на тарифе «Разработчик» исчерпана квота чатов (HTTP 466).
+
+Список чатов и история живут только в памяти вкладки. После обновления страницы они пропадают, сессия при этом сохраняется.
+
+## Требования
+
+- Node.js и npm
+- Инстанс GREEN-API в статусе `authorized`
+- Файл `.env.local` с секретом сессии
+
+## Настройка
+
+В корне проекта создайте `.env.local`:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+JWT_SECRET=длинная-случайная-строка
+GREEN_API_URL=https://3100.api.green-api.com
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`JWT_SECRET` подписывает сессию. `GREEN_API_URL` — адрес API из личного кабинета, без завершающего слэша. Если его не указать, запросы идут на `https://3100.api.green-api.com`. Файл уже в `.gitignore`, в репозиторий его класть не нужно. `idInstance` и `apiTokenInstance` в окружение не записываются: их вводят на странице входа. Значения берутся в [личном кабинете GREEN-API](https://console.green-api.com).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Запуск
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Приложение откроется на [http://localhost:3000](http://localhost:3000).
 
-To learn more about Next.js, take a look at the following resources:
+Остальные команды:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run build   # production-сборка
+npm run start   # запуск собранного приложения
+npm run lint    # eslint
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Как пользоваться
 
-## Deploy on Vercel
+1. Откройте главную страницу и войдите. Если инстанс не авторизован, сессия не создаётся.
+2. Нажмите «+» в списке чатов и введите номер без кода страны. Код выбирается в списке слева от поля.
+3. Если аккаунт на номере есть, окно закрывается и открывается чат.
+4. Напишите сообщение и отправьте его. Ответ с другого номера появится в том же окне.
+5. «Выйти» удаляет cookie и возвращает на страницу входа.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Сообщение самому себе в этот чат не приходит: отправитель и получатель — один аккаунт, входящего уведомления нет. Чтобы увидеть ответ, напишите с другого номера на номер инстанса.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Сессия
+
+`lib/session.ts` подписывает JWT (HS256) секретом `JWT_SECRET`. В payload только `idInstance` и `apiTokenInstance`. Cookie `session`: `httpOnly`, `sameSite=lax`, `path=/`, флаг `secure` только в production.
+
+Пока статус инстанса явно не равен `authorized`, главная страница сбрасывает сессию и возвращает на вход. Если проверка статуса не вернула состояние (пустой ответ или ограничение частоты), cookie не удаляется и чат остаётся открытым.
+
+## Маршруты приложения
+
+Все маршруты, кроме входа, читают cookie. Без сессии ответ `401`.
+
+| Метод | Путь | Назначение |
+| --- | --- | --- |
+| `POST` | `/api/session` | Проверяет инстанс и ставит cookie. Ошибки: `missing`, `unauthorized`, `failed`. |
+| `GET` | `/api/session` | Удаляет cookie и перенаправляет на `/`. Параметр `error` сохраняется. |
+| `POST` | `/api/check-account` | Тело `{ phoneNumber }`. Номер — 11 цифр с `7` или 12 цифр с `375`. |
+| `POST` | `/api/send-message` | Тело `{ chatId, message }`. Пустой текст и длина больше 4000 отклоняются. |
+| `GET` | `/api/notifications` | Долгий опрос входящих. Пустая очередь: `{ notification: null }`. |
+| `POST` | `/api/contact` | Тело `{ chatId }`. Возвращает имя, телефон и ссылку на аватар. |
+
+`POST /api/send-message` при квоте тарифа «Разработчик» отвечает `429` и текстом на русском. Если в ответе API перечислены уже открытые чаты, их идентификаторы приходят в `allowedChatIds`.
+
+## Методы GREEN-API
+
+Вызовы собраны в `lib/green-api.ts`.
+
+| Метод | Зачем |
+| --- | --- |
+| `getStateInstance` | Проверка, что инстанс авторизован. |
+| `checkAccount` | Есть ли аккаунт на номере и какой у него `chatId`. |
+| `getContactInfo` | Имя, телефон и аватар вместо числового `chatId`. |
+| `sendMessage` | Отправка текста в чат. |
+| `getSettings` / `setSettings` | Включает `incomingWebhook` и очищает `webhookUrl`, чтобы уведомления забирались опросом, а не HTTP-webhook. |
+| `receiveNotification` | Одно уведомление из очереди, таймаут 5 секунд. |
+| `deleteNotification` | Снимает уведомление с очереди по `receiptId`. Без этого следующее не придёт. |
+
+В переписку попадают только уведомления `incomingMessageReceived` с текстом. Сообщения, набранные в приложении на телефоне того же аккаунта, в очередь приходят как исходящие и на экране не показываются. Старые сообщения в очередь не догружаются: видно только то, что пришло после включения приёма.
+
+Опрос на клиенте ждёт около 5 секунд между пустыми ответами. На сервере одновременно выполняется один запрос `receiveNotification`.
+
+## Ограничения
+
+- Частые вызовы `checkAccount` и `getContactInfo` упираются в лимит. Повторная проверка одного номера может быть недоступна около двух часов.
+- На тарифе «Разработчик» число чатов ограничено. Закрыть чат и освободить слот нельзя: квота обновляется 1-го числа следующего месяца, либо инстанс переводят на тариф Business в личном кабинете. Разные формы одного и того же идентификатора считаются отдельными слотами.
+- Номера принимаются только для России и Беларуси.
+- Групповые чаты не поддерживаются.
+
+## Структура
+
+```
+app/
+  page.tsx                 главная: вход или чаты
+  auth-form.tsx            форма входа
+  check-account-form.tsx   список чатов, переписка, новый чат
+  api/session/             вход и выход
+  api/check-account/       проверка номера
+  api/contact/             сведения о контакте
+  api/send-message/        отправка
+  api/notifications/       входящие
+lib/
+  session.ts               подпись и проверка JWT
+  green-api.ts             вызовы GREEN-API
+public/pattern.svg         фон экранов
+```

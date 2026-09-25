@@ -24,3 +24,19 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.dark-field,
+.dark-field input {
+  color: #fff;
+  color-scheme: dark;
+  background-color: transparent;
+}
+
+.dark-field input:-webkit-autofill,
+.dark-field input:-webkit-autofill:hover,
+.dark-field input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #fff;
+  caret-color: #fff;
+  box-shadow: 0 0 0 1000px #2a2b31 inset;
+  transition: background-color 9999s ease-out;
+}
