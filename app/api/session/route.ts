@@ -2,18 +2,32 @@ import { NextResponse } from "next/server";
 import { getStateInstance } from "@/lib/green-api";
 import { signSession } from "@/lib/session";
 
-const cookieOptions = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  path: "/",
-  secure: process.env.NODE_ENV === "production",
-};
+function publicOrigin(request: Request) {
+  const host = (
+    request.headers.get("x-forwarded-host") ??
+    request.headers.get("host") ??
+    ""
+  )
+    .split(",")[0]
+    .trim();
+  const proto = (request.headers.get("x-forwarded-proto") ?? "http").split(",")[0].trim();
+  if (!host) {
+    return new URL(request.url).origin;
+  }
+  return `${proto}://${host}`;
+}
 
 export async function POST(request: Request) {
   const form = await request.formData();
   const idInstance = String(form.get("idInstance") ?? "").trim();
   const apiTokenInstance = String(form.get("apiTokenInstance") ?? "").trim();
-  const url = new URL("/", request.url);
+  const url = new URL("/", publicOrigin(request));
+  const cookieOptions = {
+    httpOnly: true,
+    sameSite: "lax" as const,
+    path: "/",
+    secure: url.protocol === "https:",
+  };
 
   if (!idInstance || !apiTokenInstance) {
     url.searchParams.set("error", "missing");
@@ -42,7 +56,7 @@ export async function POST(request: Request) {
 
 export async function GET(request: Request) {
   const incoming = new URL(request.url);
-  const url = new URL("/", request.url);
+  const url = new URL("/", publicOrigin(request));
   const error = incoming.searchParams.get("error");
   if (error) {
     url.searchParams.set("error", error);
