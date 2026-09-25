@@ -50,6 +50,58 @@ npm run start   # запуск собранного приложения
 npm run lint    # eslint
 ```
 
+## Сервер и PM2
+
+На сервере нужен Node.js 20.9 или новее. Системный Node 18 это приложение не запускает. В каталоге проекта должен лежать `.env.local`.
+
+Сборка и запуск через [PM2](https://pm2.keymetrics.io/):
+
+```bash
+npm install
+npm install -g pm2
+npm run build
+pm2 start ecosystem.config.cjs
+```
+
+`ecosystem.config.cjs` поднимает один процесс `next start` на порту 3000 и слушает все интерфейсы. Если на машине есть nvm-сборка Node 26 по пути ниже, PM2 берёт её. Иначе используется тот `node`, которым запущен сам PM2.
+
+```js
+const nvmNode = "/home/user1/.nvm/versions/node/v26.10.0/bin/node";
+const interpreter = require("node:fs").existsSync(nvmNode) ? nvmNode : process.execPath;
+
+module.exports = {
+  apps: [
+    {
+      name: "green-api-testing",
+      script: "node_modules/next/dist/bin/next",
+      args: "start -H 0.0.0.0 -p 3000",
+      interpreter,
+      exec_mode: "fork",
+      instances: 1,
+      env: {
+        NODE_ENV: "production",
+      },
+    },
+  ],
+};
+```
+
+Режим `cluster` и несколько инстансов на этот порт не подходят: второй процесс не может занять порт и уходит в перезапуск.
+
+Полезные команды:
+
+```bash
+pm2 status                         # состояние процессов
+pm2 logs green-api-testing         # журнал
+pm2 restart green-api-testing      # перезапуск после новой сборки
+pm2 stop green-api-testing         # остановить
+pm2 delete green-api-testing       # убрать из списка PM2
+pm2 save                           # запомнить текущий список
+pm2 startup                        # поднять процессы после перезагрузки машины
+```
+
+После `npm run build` нужен `pm2 restart green-api-testing`: PM2 сам исходники не пересобирает. `pm2 save` и `pm2 startup` сохраняют процесс между перезагрузками сервера.
+
 ## Как пользоваться
 
 1. Откройте главную страницу и войдите. Если инстанс не авторизован, сессия не создаётся.
@@ -122,4 +174,5 @@ lib/
   session.ts               подпись и проверка JWT
   green-api.ts             вызовы GREEN-API
 public/pattern.svg         фон экранов
+ecosystem.config.cjs       запуск production-сборки через PM2
 ```
